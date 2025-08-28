@@ -1,0 +1,142 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>3×5 タイル タイムアタック</title>
+  <style>
+    :root{ --gap:12px; --tile-size:clamp(60px, 12vw, 100px); }
+    *{box-sizing:border-box}
+    body{font-family:system-ui, -apple-system, "Segoe UI", Roboto, "Hiragino Kaku Gothic ProN", "Yu Gothic UI", "Noto Sans JP", sans-serif; padding:20px; display:flex; gap:20px; align-items:flex-start; justify-content:center; background:#0f172a; color:#e6eef8; min-height:100vh}
+    .panel{max-width:520px; width:100%}
+    h1{font-size:18px;margin:0 0 10px}
+    p{margin:6px 0 14px;color:#cbd5e1}
+    .board{display:grid; grid-template-columns:repeat(3, var(--tile-size)); grid-auto-rows:var(--tile-size); gap:var(--gap); touch-action:manipulation}
+    .tile{display:flex;align-items:center;justify-content:center;border-radius:12px;background:linear-gradient(180deg,#1e293b,#0b1220);box-shadow:0 6px 16px rgba(2,6,23,0.6), inset 0 -3px 6px rgba(255,255,255,0.02);user-select:none;cursor:pointer;font-weight:700;font-size:20px;color:#9fb7ff}
+    .tile.touched{background:linear-gradient(180deg,#10b981,#059669); color:#02130a; transform:translateY(2px); box-shadow:0 3px 6px rgba(2,6,23,0.5), inset 0 -3px 8px rgba(255,255,255,0.06)}
+    .controls{display:flex;gap:8px;align-items:center;margin-top:14px}
+    button{background:#111827;border:1px solid rgba(255,255,255,0.04);color:#dbeafe;padding:8px 12px;border-radius:8px;cursor:pointer}
+    button.secondary{background:transparent;border:1px solid rgba(255,255,255,0.06)}
+    .time{font-size:20px;font-weight:700}
+    .small{font-size:13px;color:#94a3b8}
+    footer{margin-top:16px;color:#94a3b8;font-size:13px}
+    @media (max-width:420px){:root{--gap:8px} h1{font-size:16px}}
+  </style>
+</head>
+<body>
+  <div class="panel">
+    <h1>3×5 タイル タイムアタック</h1>
+    <p class="small">全部で15個のタイルをタップ（クリック）して、全部触れたときの時間を競います。最初のタップで計測開始です</p>
+
+    <div id="board" class="board" aria-label="3x5 タイルボード"></div>
+
+    <div class="controls">
+      <div class="time" id="time">--: --</div>
+      <button id="reset">リセット</button>
+      <button id="hint" class="secondary">使い方</button>
+    </div>
+
+    <footer id="message">タイルをタップしてスタート</footer>
+  </div>
+
+<script>
+(function(){
+  const COLS = 3;
+  const ROWS = 5;
+  const TOTAL = COLS * ROWS;
+  const board = document.getElementById('board');
+  const timeEl = document.getElementById('time');
+  const resetBtn = document.getElementById('reset');
+  const hintBtn = document.getElementById('hint');
+  const msg = document.getElementById('message');
+
+  let startTime = null;
+  let touchedCount = 0;
+  let finished = false;
+
+  function formatMs(ms){
+    const s = Math.floor(ms/1000);
+    const msRem = Math.floor(ms % 1000);
+    return s + '.' + String(msRem).padStart(3,'0') + ' s';
+  }
+
+  function createTiles(){
+    board.innerHTML = '';
+    for(let r=0; r<ROWS; r++){
+      for(let c=0; c<COLS; c++){
+        const idx = r*COLS + c + 1;
+        const tile = document.createElement('button');
+        tile.className = 'tile';
+        tile.type = 'button';
+        tile.dataset.touched = 'false';
+        tile.dataset.index = String(idx);
+        tile.setAttribute('aria-pressed','false');
+        tile.textContent = idx;
+
+        // pointer events handle mouse & touch & stylus
+        tile.addEventListener('pointerdown', onTouch);
+        board.appendChild(tile);
+      }
+    }
+  }
+
+  function onTouch(e){
+    if(finished) return;
+    const tile = e.currentTarget;
+    if(tile.dataset.touched === 'true') return; // already touched
+
+    if(!startTime){
+      startTime = performance.now();
+      msg.textContent = '計測中…';
+    }
+
+    tile.dataset.touched = 'true';
+    tile.classList.add('touched');
+    tile.setAttribute('aria-pressed','true');
+    touchedCount++;
+
+    if(touchedCount >= TOTAL){
+      const elapsed = performance.now() - startTime;
+      finished = true;
+      timeEl.textContent = formatMs(elapsed);
+      msg.textContent = 'おめでとう！タイムは ' + timeEl.textContent + ' だよ';
+      // announce for screen readers
+      tile.setAttribute('aria-label', '最後のタイル');
+    }
+  }
+
+  function reset(){
+    startTime = null; touchedCount = 0; finished = false;
+    timeEl.textContent = '--: --';
+    msg.textContent = 'タイルをタップしてスタート';
+    // reset tiles
+    board.querySelectorAll('.tile').forEach(t => {
+      t.dataset.touched = 'false';
+      t.classList.remove('touched');
+      t.setAttribute('aria-pressed','false');
+    });
+  }
+
+  resetBtn.addEventListener('click', reset);
+  hintBtn.addEventListener('click', ()=>{
+    alert('ルール:\n・全部で15個のタイルをタップ（クリック）してね\n・最初のタップで時間計測開始\n・最後のタイルをタップした瞬間の経過時間を表示するよ\n・リセットで最初からやり直せるよ')
+  });
+
+  // 初期化
+  createTiles();
+
+  // キーボードでの操作補助: Enter/Spaceでフォーカス中のタイルを触れる
+  board.addEventListener('keydown', (e)=>{
+    if(e.key === 'Enter' || e.key === ' ') {
+      const target = document.activeElement;
+      if(target && target.classList.contains('tile')){
+        target.dispatchEvent(new PointerEvent('pointerdown', {bubbles:true}));
+        e.preventDefault();
+      }
+    }
+  });
+
+})();
+</script>
+</body>
+</html>
