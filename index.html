@@ -14,12 +14,12 @@
     .board{display:grid; grid-template-columns:repeat(3, var(--tile-size)); grid-auto-rows:var(--tile-size); gap:var(--gap); touch-action:manipulation}
     .tile{display:flex;align-items:center;justify-content:center;border-radius:12px;background:linear-gradient(180deg,#1e293b,#0b1220);box-shadow:0 6px 16px rgba(2,6,23,0.6), inset 0 -3px 6px rgba(255,255,255,0.02);user-select:none;cursor:pointer;font-weight:700;font-size:20px;color:#9fb7ff}
     .tile.touched{background:linear-gradient(180deg,#10b981,#059669); color:#02130a; transform:translateY(2px); box-shadow:0 3px 6px rgba(2,6,23,0.5), inset 0 -3px 8px rgba(255,255,255,0.06)}
-    .controls{display:flex;gap:8px;align-items:center;margin-top:14px}
+    .controls{display:flex;gap:8px;align-items:center;margin-top:14px;flex-wrap:wrap}
     button{background:#111827;border:1px solid rgba(255,255,255,0.04);color:#dbeafe;padding:8px 12px;border-radius:8px;cursor:pointer}
     button.secondary{background:transparent;border:1px solid rgba(255,255,255,0.06)}
     .time{font-size:20px;font-weight:700}
     .small{font-size:13px;color:#94a3b8}
-    footer{margin-top:16px;color:#94a3b8;font-size:13px}
+    footer{margin-top:16px;color:#94a3b8;font-size:13px;word-break:break-all}
     @media (max-width:420px){:root{--gap:8px} h1{font-size:16px}}
   </style>
 </head>
@@ -33,6 +33,7 @@
     <div class="controls">
       <div class="time" id="time">--: --</div>
       <button id="reset">リセット</button>
+      <button id="share" class="secondary">結果を共有</button>
       <button id="hint" class="secondary">使い方</button>
     </div>
 
@@ -40,7 +41,7 @@
   </div>
 
 <script>
-(function(){
+(async function(){
   const COLS = 3;
   const ROWS = 5;
   const TOTAL = COLS * ROWS;
@@ -48,11 +49,13 @@
   const timeEl = document.getElementById('time');
   const resetBtn = document.getElementById('reset');
   const hintBtn = document.getElementById('hint');
+  const shareBtn = document.getElementById('share');
   const msg = document.getElementById('message');
 
   let startTime = null;
   let touchedCount = 0;
   let finished = false;
+  let lastTime = null;
 
   function formatMs(ms){
     const s = Math.floor(ms/1000);
@@ -72,8 +75,6 @@
         tile.dataset.index = String(idx);
         tile.setAttribute('aria-pressed','false');
         tile.textContent = idx;
-
-        // pointer events handle mouse & touch & stylus
         tile.addEventListener('pointerdown', onTouch);
         board.appendChild(tile);
       }
@@ -83,7 +84,7 @@
   function onTouch(e){
     if(finished) return;
     const tile = e.currentTarget;
-    if(tile.dataset.touched === 'true') return; // already touched
+    if(tile.dataset.touched === 'true') return; 
 
     if(!startTime){
       startTime = performance.now();
@@ -98,18 +99,16 @@
     if(touchedCount >= TOTAL){
       const elapsed = performance.now() - startTime;
       finished = true;
+      lastTime = elapsed;
       timeEl.textContent = formatMs(elapsed);
       msg.textContent = 'おめでとう！タイムは ' + timeEl.textContent + ' だよ';
-      // announce for screen readers
-      tile.setAttribute('aria-label', '最後のタイル');
     }
   }
 
   function reset(){
-    startTime = null; touchedCount = 0; finished = false;
+    startTime = null; touchedCount = 0; finished = false; lastTime = null;
     timeEl.textContent = '--: --';
     msg.textContent = 'タイルをタップしてスタート';
-    // reset tiles
     board.querySelectorAll('.tile').forEach(t => {
       t.dataset.touched = 'false';
       t.classList.remove('touched');
@@ -117,15 +116,57 @@
     });
   }
 
+  async function sha256(message){
+    const msgBuffer = new TextEncoder().encode(message);
+    const hashBuffer = await crypto.subtle.digest('SHA-256', msgBuffer);
+    const hashArray = Array.from(new Uint8Array(hashBuffer));
+    return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+  }
+
+  async function share(){
+    if(!lastTime){
+      alert('まずタイムを出してください');
+      return;
+    }
+    const timeMs = Math.floor(lastTime);
+    const secret = 'simple_secret_key';
+    const hash = await sha256(timeMs + secret);
+    const url = location.origin + location.pathname + '?time=' + timeMs + '&hash=' + hash;
+    try{
+      await navigator.clipboard.writeText(url);
+      msg.textContent = '共有URLをコピーしました！';
+    }catch(err){
+      alert('コピーできませんでした: ' + err);
+    }
+  }
+
+  function checkURL(){
+    const params = new URLSearchParams(location.search);
+    if(params.has('time') && params.has('hash')){
+      const t = parseInt(params.get('time'));
+      const h = params.get('hash');
+      const secret = 'simple_secret_key';
+      sha256(t + secret).then(calc => {
+        if(calc === h){
+          timeEl.textContent = formatMs(t);
+          msg.textContent = '共有されたタイム: ' + formatMs(t);
+          finished = true;
+        }else{
+          msg.textContent = 'URLのハッシュが不正です';
+        }
+      });
+    }
+  }
+
   resetBtn.addEventListener('click', reset);
   hintBtn.addEventListener('click', ()=>{
-    alert('ルール:\n・全部で15個のタイルをタップ（クリック）してね\n・最初のタップで時間計測開始\n・最後のタイルをタップした瞬間の経過時間を表示するよ\n・リセットで最初からやり直せるよ')
+    alert('ルール:\n・全部で15個のタイルをタップ（クリック）してね\n・最初のタップで時間計測開始\n・最後のタイルをタップした瞬間の経過時間を表示するよ\n・リセットで最初からやり直せるよ\n・結果を共有ボタンでURLをコピーできるよ')
   });
+  shareBtn.addEventListener('click', share);
 
-  // 初期化
   createTiles();
+  checkURL();
 
-  // キーボードでの操作補助: Enter/Spaceでフォーカス中のタイルを触れる
   board.addEventListener('keydown', (e)=>{
     if(e.key === 'Enter' || e.key === ' ') {
       const target = document.activeElement;
